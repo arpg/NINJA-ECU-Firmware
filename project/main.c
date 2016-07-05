@@ -39,6 +39,9 @@
 #include "tim.h"
 #include "usart.h"
 #include "gpio.h"
+#include "iwdg.h"
+#include "stm32f2xx_hal.h"
+
 
 /* average PWM frequency assumed to be 25 khz. For more information
 check the the timer frequency and the prescaler of the motor pwm pins */
@@ -103,7 +106,7 @@ HAL_StatusTypeDef status2;                                      // return type o
 #define servo_d TIM9->CCR1       
 
 unsigned char packet[packet_size + headers];        // total size of packet
-osThreadId hscheduler,himu,hmotor,hled;
+osThreadId hscheduler,himu,hmotor,hled,hwdt;							//thread id handles
 osSemaphoreId sema_imu_id,sema_sched_id;
 unsigned char state = 0;                  // rotor state of bldc
 int cnt = 0;
@@ -152,6 +155,7 @@ void imu_data_collect();
 void packet_form(uint32_t *adc_d);
 static void imu_thread(void const *argument);
 static void led_thread(void const *argument);
+static void wdt_thread(void const *argument);
 
 /* USER CODE BEGIN PFP */
 /* Private function prototypes -----------------------------------------------*/
@@ -163,7 +167,7 @@ static void led_thread(void const *argument);
 /* USER CODE END 0 */
 
 int main(void)
- {
+  {
 
   /* USER CODE BEGIN 1 */
 
@@ -190,6 +194,11 @@ int main(void)
   MX_TIM5_Init();
   MX_TIM9_Init();
   MX_USART3_UART_Init();
+	MX_IWDG_Init();
+	
+	HAL_IWDG_Start(&hiwdg);
+	
+	//HAL_IWDG_Refresh(&hiwdg);
 	
 	adc_init_values();
 	HAL_TIM_Base_Start(&htim1);
@@ -216,14 +225,14 @@ int main(void)
   send_i2c=0x18;
   HAL_I2C_Mem_Write(&hi2c3,0xD0,0x18,1,&send_i2c,1,10);
   /* USER CODE END 2 */
-	recev=-20;
+	recev=-10;
 	
 	HAL_ADC_Start_DMA(&hadc1,adc_values,7*sizeof(adc_values[0]));
 	 /* Transmit the packet continuously through DMA */
   //HAL_UART_Transmit_DMA(&huart3,(uint8_t *)packet, sizeof(packet));
   /* Receive the command, one byte of signed integer value */
-  HAL_UART_Receive_DMA(&huart3,(int8_t *)&recev,1);
-	//HAL_UART_Transmit_DMA(&huart3,&anv,sizeof(anv));
+  //HAL_UART_Receive_DMA(&huart3,(int8_t *)&recev,1);
+	HAL_UART_Transmit_DMA(&huart3,&anv,sizeof(anv));
 	//HAL_UART_Transmit_DMA(&huart3,(uint8_t *)&recev, sizeof(int8_t));
   /* Start ADC conversions and save the value to memory through DMA. 7 channels 7 memory positions*/
   //
@@ -239,26 +248,12 @@ int main(void)
 	
   /* Start scheduler */
   osKernelStart();
-	//scheduler_thread(NULL);
-  
-  /* We should never get here as control is now taken by the scheduler */
 
-  /* Infinite loop */
-  /* USER CODE BEGIN WHILE */
-  while (1)
-  {
-  /* USER CODE END WHILE */
-
-  /* USER CODE BEGIN 3 */
-
-  }
-  /* USER CODE END 3 */
 
 }
 
 static void motor_thread(void const *argument)
 {
-	int a=0;
 	while (1)
   { 
     /* get the rotor state of the bldc */
@@ -267,11 +262,6 @@ static void motor_thread(void const *argument)
     state |= HAL_GPIO_ReadPin(sens_gpio,sens_ph2_pin);
     state = state << 1;
     state |= HAL_GPIO_ReadPin(sens_gpio,sens_ph3_pin);
-    a++;
-    /* IMU data collection and packet formation */         
-    /* There is no interrupt involved with UART hence its mostly polling
-       if recev is positive then direction is forward, incase of negative,
-        direction is reverse */
     if(recev >= 0)
     {
 			
@@ -281,7 +271,6 @@ static void motor_thread(void const *argument)
     {
       motor_rotate_backward(state, abs(recev));
     }
-		 
 		
   }
 }
@@ -289,18 +278,30 @@ static void scheduler_thread(void const *argument)
 {
 	while(1)
 	{
-	osSemaphoreWait(sema_sched_id,osWaitForever);
+	osSemaphoreWait(sema_sched_id,osWaitForever);		
+	// Thread parameters definition
 	osThreadDef(imu,imu_thread,osPriorityHigh,0,configMINIMAL_STACK_SIZE);
 	osThreadDef(motor,motor_thread,osPriorityHigh,0,configMINIMAL_STACK_SIZE);
 	osThreadDef(ledt,led_thread,osPriorityHigh,0,configMINIMAL_STACK_SIZE);
-	//himu=osThreadCreate(osThread(imu),NULL);
+	osThreadDef(wdt,wdt_thread,osPriorityHigh,0,configMINIMAL_STACK_SIZE);
+	//Thread creation
+	himu=osThreadCreate(osThread(imu),NULL);
 	hmotor=osThreadCreate(osThread(motor),NULL);
 	hled=osThreadCreate(osThread(ledt),NULL);
+	hwdt=osThreadCreate(osThread(wdt),NULL);
 	
 	}
 	
 }
-static void led_thread(void const *argument)
+static void wdt_thread(void const *argument)
+{
+	while(1)
+	{
+		HAL_IWDG_Refresh(&hiwdg); 			//***implement flag check for each task in the end****
+		osDelay(1000);	
+	}
+}
+static void led_thread(void const *argument)			//blink LED
 {
 		int dut=0;
 		while(1)
@@ -312,6 +313,7 @@ static void led_thread(void const *argument)
 				servo_d=200;
 			}
 			else servo_d=101;
+			
 			osDelay(2000);
 		}
 }
@@ -320,7 +322,8 @@ static void imu_thread(void const *argument)
 	while(1)
 	{		
 		packet_form(adc_values);
-		osDelay(1000);	
+			//HAL_IWDG_Refresh(&hiwdg); 
+		osDelay(1);
 	}
 }	
 
