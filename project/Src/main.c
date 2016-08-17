@@ -36,6 +36,7 @@
 #include "adc.h"
 #include "tim.h"
 #include "usart.h"
+#include "dma.h"
 #include "gpio.h"
 
 /* Private variables ---------------------------------------------------------*/
@@ -92,7 +93,8 @@ void HAL_TIM_MspPostInit(TIM_HandleTypeDef *htim);
 uint8_t anv=0x30;
 unsigned char state = 0;  
 int recev; 
-                
+uint8_t tx_buff[3] = {'a','b','c'};                
+uint8_t buff2;                
 
 
 int main(void)
@@ -118,13 +120,14 @@ int main(void)
   MX_TIM3_Init();
   MX_TIM4_Init();
   MX_TIM5_Init();
+	MX_DMA_Init();
   MX_USART3_UART_Init();
 	
 	osThreadDef(ledt,led_thread,osPriorityRealtime,0,configMINIMAL_STACK_SIZE);
 	osThreadDef(servot,servo_thread,osPriorityRealtime,0,configMINIMAL_STACK_SIZE);
 	osThreadDef(motor,motor_thread,osPriorityHigh,0,configMINIMAL_STACK_SIZE);
 	hled=osThreadCreate(osThread(ledt),NULL);
-	hservo=osThreadCreate(osThread(servot),NULL);
+	//hservo=osThreadCreate(osThread(servot),NULL);
 	hmotor=osThreadCreate(osThread(motor),NULL);
 
 	HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_1);
@@ -132,16 +135,19 @@ int main(void)
 	HAL_TIM_PWM_Start(&htim4, TIM_CHANNEL_1);
   HAL_TIM_PWM_Start(&htim4, TIM_CHANNEL_2);
   HAL_TIM_PWM_Start(&htim4, TIM_CHANNEL_3);
-	//HAL_UART_Transmit_DMA(&huart3,&anv,sizeof(anv));
+	HAL_UART_Transmit_DMA(&huart3,&tx_buff[0],sizeof(tx_buff));
+	HAL_UART_Receive_DMA(&huart3,&buff2,sizeof(buff2));
 	HAL_GPIO_WritePin(DcCal_gpio,DcCal_pin,GPIO_PIN_RESET);
   HAL_GPIO_WritePin(EnGate_gpio,EnGate_pin,GPIO_PIN_SET);
-	recev=0;
+	servo_d1=75;
+	servo_d2=75;
+	recev=20;
 	/* Start scheduler */
   osKernelStart();
   
 	/* We should never get here as control is now taken by the scheduler */
   /* Infinite loop */
-  while (1){};
+  while (1);
 }
 
 /** System Clock Configuration
