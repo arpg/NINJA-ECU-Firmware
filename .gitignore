@@ -6,3 +6,10 @@
 *.sct
 *.lst
 *.axf
+*.d
+*.o
+*.map
+*.iex
+*.Akshay
+*.uvprojx
+*.uvoptx

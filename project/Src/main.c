@@ -47,7 +47,6 @@ osThreadId hscheduler,himu,hmotor,hled,hservo;
 osSemaphoreId sema_sched_id;
 
 /* Private function prototypes -----------------------------------------------*/
-static void scheduler_thread(void const *argument);
 static void led_thread(void const *argument);
 static void servo_thread(void const *argument);
 static void motor_thread(void const *argument);
@@ -128,16 +127,15 @@ int main(void)
 	hservo=osThreadCreate(osThread(servot),NULL);
 	hmotor=osThreadCreate(osThread(motor),NULL);
 
-	
-  HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_1);
-	HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_3);
+	HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_1);
+  HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_3);
 	HAL_TIM_PWM_Start(&htim4, TIM_CHANNEL_1);
   HAL_TIM_PWM_Start(&htim4, TIM_CHANNEL_2);
   HAL_TIM_PWM_Start(&htim4, TIM_CHANNEL_3);
 	//HAL_UART_Transmit_DMA(&huart3,&anv,sizeof(anv));
 	HAL_GPIO_WritePin(DcCal_gpio,DcCal_pin,GPIO_PIN_RESET);
   HAL_GPIO_WritePin(EnGate_gpio,EnGate_pin,GPIO_PIN_SET);
-	recev=20;
+	recev=0;
 	/* Start scheduler */
   osKernelStart();
   
@@ -153,11 +151,11 @@ static void servo_thread(void const *argument)
 {
 	while(1)
 	{
-		servo_d1=201;
-		servo_d2=201;
-		osDelay(1000);
 		servo_d1=100;
 		servo_d2=100;
+		osDelay(1000);
+		servo_d1=50;
+		servo_d2=50;
 		osDelay(1000);
 		anv++;
 	}
@@ -194,7 +192,7 @@ static void led_thread(void const *argument)
 	while(1)
 	{
 		HAL_GPIO_TogglePin(Led_gpio,Led_pin);
-		osDelay(100);
+		osDelay(50);
 	}
 }
 
@@ -203,7 +201,7 @@ void GPIO_pwm(uint16_t GPIO_Pin, GPIO_PinState PinState, uint8_t duty)
 {
   /* calculation of duty cycle relative to period */
   uint8_t duty_cycle_motor = 0;
-  duty_cycle_motor = (duty * pwm_period)/127; 
+  duty_cycle_motor = (duty * pwm_period)/100; 
   /* if pin state is set apply the duty cycle value to the compare register of the particular pin */
   if(PinState == GPIO_PIN_SET)
   {
