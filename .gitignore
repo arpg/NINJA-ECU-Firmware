@@ -1,1 +1,6 @@
 # files to be ignored
+*.crf
+*.dep
+*.htm
+*.lnp
+*.sct
