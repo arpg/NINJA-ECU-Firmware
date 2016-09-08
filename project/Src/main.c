@@ -38,25 +38,55 @@
 #include "usart.h"
 #include "dma.h"
 #include "gpio.h"
+#include <string.h>
 
 /* Private variables ---------------------------------------------------------*/
 void SystemClock_Config(void);
 void Error_Handler(void);
 void MX_FREERTOS_Init(void);
 
-osThreadId hscheduler,himu,hmotor,hled,hservo;
+osThreadId hscheduler,himu,hmotor,hled,hservo,husart,hcopy;
 osSemaphoreId sema_sched_id;
 
 /* Private function prototypes -----------------------------------------------*/
 static void led_thread(void const *argument);
 static void servo_thread(void const *argument);
 static void motor_thread(void const *argument);
+static void usart_thread(void const *argument);
 void motor_rotate_forward(char sens, uint8_t duty_motor);
 void motor_rotate_backward(char sens, uint8_t duty_motor);
 void HAL_TIM_MspPostInit(TIM_HandleTypeDef *htim);
-
+void restart1();
+int allign(uint8_t buff[26]);
+static void copy_thread(void const *argument);
 
 /********************Defines***************/
+
+struct ComRecDataPack{
+	char delimiter[4];
+	float steering_angle;
+	float motor_power_percent;
+	unsigned int dev_time;
+	unsigned int chksum;
+}rec_pack,pack1,pack2;
+
+struct ComTrDataPack{
+	char delimiter[4];
+	char pack_size;
+	char pack_type;
+	float enc0;
+	float enc1;
+	float enc2;
+	float enc3;
+	float steer_ang;
+	float swing_ang0;
+	float swing_ang1;
+	float swing_ang2;
+	float swing_ang3;
+	float motor_current;
+	unsigned int dev_time;
+	unsigned int chksum;
+};
 #define pwm_period 400
 
 #define servo_d1 TIM1->CCR1
@@ -89,13 +119,21 @@ void HAL_TIM_MspPostInit(TIM_HandleTypeDef *htim);
 #define pulse_2 TIM4->CCR1       //n3
 #define pulse_3 TIM4->CCR3       //n1
 
+//#define packet_size 22
 /******************Global Variables**************/
 uint8_t anv=0x30;
+uint8_t mcpy=0;
+int a=0,b,packet_size;
 unsigned char state = 0;  
 int recev; 
-uint8_t tx_buff[3] = {'a','b','c'};                
-uint8_t buff2;                
-
+uint8_t tx_buff[4] = {'a','b','c','\n'};     
+uint8_t mx_buff[26],mx_buff1[26]; 
+uint8_t buff11[22]; 
+uint32_t enc1[8],enc2[8];
+#define enco1 TIM3->CNT 
+#define enco2 TIM2->CNT 
+#define enco3 TIM8->CNT 
+#define enco4 TIM5->CNT 
 
 int main(void)
 {
@@ -108,7 +146,7 @@ int main(void)
 
   /* Reset of all peripherals, Initializes the Flash interface and the Systick. */
   HAL_Init();
-
+	
   /* Configure the system clock */
   SystemClock_Config();
 
@@ -120,28 +158,46 @@ int main(void)
   MX_TIM3_Init();
   MX_TIM4_Init();
   MX_TIM5_Init();
+	MX_TIM8_Init();
 	MX_DMA_Init();
   MX_USART3_UART_Init();
 	
+	osThreadDef(copyt,copy_thread,osPriorityRealtime,0,configMINIMAL_STACK_SIZE);
 	osThreadDef(ledt,led_thread,osPriorityRealtime,0,configMINIMAL_STACK_SIZE);
 	osThreadDef(servot,servo_thread,osPriorityRealtime,0,configMINIMAL_STACK_SIZE);
 	osThreadDef(motor,motor_thread,osPriorityHigh,0,configMINIMAL_STACK_SIZE);
+	osThreadDef(usart,usart_thread,osPriorityHigh,0,configMINIMAL_STACK_SIZE);
 	hled=osThreadCreate(osThread(ledt),NULL);
 	//hservo=osThreadCreate(osThread(servot),NULL);
 	hmotor=osThreadCreate(osThread(motor),NULL);
-
+	husart=osThreadCreate(osThread(usart),NULL);
+	hcopy=osThreadCreate(osThread(copyt),NULL);
 	HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_1);
   HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_3);
 	HAL_TIM_PWM_Start(&htim4, TIM_CHANNEL_1);
   HAL_TIM_PWM_Start(&htim4, TIM_CHANNEL_2);
   HAL_TIM_PWM_Start(&htim4, TIM_CHANNEL_3);
-	HAL_UART_Transmit_DMA(&huart3,&tx_buff[0],sizeof(tx_buff));
-	HAL_UART_Receive_DMA(&huart3,&buff2,sizeof(buff2));
+	
+	osSemaphoreDef(sem1);
+	sema_sched_id=osSemaphoreCreate(osSemaphore(sem1),0);
+	packet_size=sizeof(rec_pack);
+	b=packet_size;
+	//	HAL_UART_Transmit_DMA(&huart3,&tx_buff[0],sizeof(tx_buff));
+		HAL_UART_Receive_DMA(&huart3,&mx_buff[0],packet_size);
+	//HAL_UART_Receive_DMA(&huart3,&rx_buff[0],sizeof(rx_buff));
 	HAL_GPIO_WritePin(DcCal_gpio,DcCal_pin,GPIO_PIN_RESET);
   HAL_GPIO_WritePin(EnGate_gpio,EnGate_pin,GPIO_PIN_SET);
+	HAL_TIM_Encoder_Start_DMA(&htim3,TIM_CHANNEL_ALL,enc1,enc2,8);
+	HAL_TIM_Encoder_Start_DMA(&htim2,TIM_CHANNEL_ALL,enc1,enc2,8);
+	HAL_TIM_Encoder_Start_DMA(&htim8,TIM_CHANNEL_ALL,enc1,enc2,8);
+	HAL_TIM_Encoder_Start_DMA(&htim5,TIM_CHANNEL_ALL,enc1,enc2,8);
+	
+//	HAL_DMAEx_MultiBufferStart(huart3.hdmarx, (uint32_t)huart3.pRxBuffPtr,buff11[0],buff12[0],sizeof(buff11));
+
+	
 	servo_d1=75;
 	servo_d2=75;
-	recev=20;
+	recev=0;
 	/* Start scheduler */
   osKernelStart();
   
@@ -152,16 +208,77 @@ int main(void)
 
 /** System Clock Configuration
 */
+static void copy_thread(void const *argument) {
+	int c;
+	while(1)
+	{
+		osSemaphoreWait(sema_sched_id,osWaitForever);
+		c=b;
+		if (c!=packet_size)
+		{
+			b=packet_size;
+		}
+		else 
+		{
+			memcpy(&rec_pack,&mx_buff,sizeof(rec_pack));
+			b=allign((uint8_t *)(&rec_pack));
+		}
+		if (b!=packet_size && b!=-1)
+		{
+			HAL_UART_Receive_DMA(&huart3,&buff11[0],b);
+		}
+		else 
+		HAL_UART_Receive_DMA(&huart3,&mx_buff[0],sizeof(rec_pack));
+		
+	}	
+}
+
+void restart1()
+{
+			mcpy=1;
+	
+}
+
+int allign(uint8_t buff[26])
+{
+		if (buff[0]==0xAA && buff[1]==0x55 && buff[2]==0xE1 && buff[3]==0x1E)	
+		{	
+			return(packet_size);
+		
+		}
+		else
+		{
+			for (int i=1;i<packet_size;i++)
+				{
+					if (buff[i]==0xAA)
+					{
+						if (buff[(i+1)%packet_size]==0x55 && buff[(i+2)%packet_size]==0xE1 && buff[(i+3)%packet_size]==0x1E)
+						{
+							
+							return(i);
+						}
+					}
+				}
+		}		
+		return (-1);
+}
+static void usart_thread(void const *argument) {
+	char delimiter;
+	while(1){
+		delimiter = rec_pack.delimiter[0];
+		
+	}
+}
 
 static void servo_thread(void const *argument)
 {
 	while(1)
 	{
-		servo_d1=100;
-		servo_d2=100;
+		servo_d1=35;
+		servo_d2=35;
 		osDelay(1000);
-		servo_d1=50;
-		servo_d2=50;
+		servo_d1=120;
+		servo_d2=120;
 		osDelay(1000);
 		anv++;
 	}
@@ -169,7 +286,6 @@ static void servo_thread(void const *argument)
 
 static void motor_thread(void const *argument)
 {
-	int a=0;
 	while (1)
   { 
     /* get the rotor state of the bldc */
@@ -187,9 +303,11 @@ static void motor_thread(void const *argument)
     {
       motor_rotate_backward(state, abs(recev));
     }
-		if (a%100000==0)		HAL_GPIO_TogglePin(Led_gpio,Led_pin2);
-		a++; 
-			
+		if (mcpy==1)
+		{
+			osSemaphoreRelease(sema_sched_id);
+			mcpy=0;	
+		}
   }
 }
 
