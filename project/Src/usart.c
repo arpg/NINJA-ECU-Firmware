@@ -46,7 +46,6 @@ UART_HandleTypeDef huart3;
 DMA_HandleTypeDef hdma_usart3_rx;
 DMA_HandleTypeDef hdma_usart3_tx;
 
-
 /* USART3 init function */
 
 void MX_USART3_UART_Init(void)

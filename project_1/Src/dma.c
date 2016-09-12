@@ -1,8 +1,8 @@
 /**
   ******************************************************************************
-  * File Name          : dma.h
-  * Description        : This file contains all the function prototypes for
-  *                      the dma.c file
+  * File Name          : dma.c
+  * Description        : This file provides code for the configuration
+  *                      of all the requested memory to memory DMA transfers.
   ******************************************************************************
   *
   * COPYRIGHT(c) 2016 STMicroelectronics
@@ -31,40 +31,47 @@
   *
   ******************************************************************************
   */
-/* Define to prevent recursive inclusion -------------------------------------*/
-#ifndef __dma_H
-#define __dma_H
-
-#ifdef __cplusplus
- extern "C" {
-#endif
-
 /* Includes ------------------------------------------------------------------*/
-#include "stm32f2xx_hal.h"
+#include "dma.h"
 
-int dma_flag;
-/* DMA memory to memory transfer handles -------------------------------------*/
-extern void Error_Handler(void);
+/* USER CODE BEGIN 0 */
 
-/* USER CODE BEGIN Includes */
+/* USER CODE END 0 */
 
-/* USER CODE END Includes */
+/*----------------------------------------------------------------------------*/
+/* Configure DMA                                                              */
+/*----------------------------------------------------------------------------*/
 
-/* USER CODE BEGIN Private defines */
+/* USER CODE BEGIN 1 */
 
-/* USER CODE END Private defines */
+/* USER CODE END 1 */
 
-void MX_DMA_Init(void);
+/** 
+  * Enable DMA controller clock
+  */
 
-/* USER CODE BEGIN Prototypes */
+void MX_DMA_Init(void) 
+{
+  /* DMA controller clock enable */
+  __HAL_RCC_DMA1_CLK_ENABLE();
 
-/* USER CODE END Prototypes */
+  /* DMA interrupt init */
+  /* DMA1_Stream1_IRQn interrupt configuration */
+  HAL_NVIC_SetPriority(DMA1_Stream1_IRQn, 5, 0);
+  HAL_NVIC_EnableIRQ(DMA1_Stream1_IRQn);
+  /* DMA1_Stream3_IRQn interrupt configuration */
+  HAL_NVIC_SetPriority(DMA1_Stream3_IRQn, 5, 0);
+  HAL_NVIC_EnableIRQ(DMA1_Stream3_IRQn);
 
-#ifdef __cplusplus
 }
-#endif
 
-#endif /* __dma_H */
+/* USER CODE BEGIN 2 */
+
+/* USER CODE END 2 */
+
+/**
+  * @}
+  */
 
 /**
   * @}

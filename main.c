@@ -32,20 +32,20 @@
   */
 /* Includes ------------------------------------------------------------------*/
 #include "stm32f2xx_hal.h"
-#include <string.h>
 #include "cmsis_os.h"
 #include "adc.h"
 #include "tim.h"
 #include "usart.h"
 #include "dma.h"
 #include "gpio.h"
+#include <string.h>
 
 /* Private variables ---------------------------------------------------------*/
 void SystemClock_Config(void);
 void Error_Handler(void);
 void MX_FREERTOS_Init(void);
 
-osThreadId hscheduler,himu,hmotor,hled,hservo,husart;
+osThreadId hscheduler,himu,hmotor,hled,hservo,husart,hcopy;
 osSemaphoreId sema_sched_id;
 
 /* Private function prototypes -----------------------------------------------*/
@@ -58,13 +58,12 @@ void motor_rotate_backward(char sens, uint8_t duty_motor);
 void HAL_TIM_MspPostInit(TIM_HandleTypeDef *htim);
 void restart1();
 int allign(uint8_t buff[26]);
+static void copy_thread(void const *argument);
 
 /********************Defines***************/
 
 struct ComRecDataPack{
 	char delimiter[4];
-	char pack_size;
-	char pack_type;
 	float steering_angle;
 	float motor_power_percent;
 	unsigned int dev_time;
@@ -73,8 +72,6 @@ struct ComRecDataPack{
 
 struct ComTrDataPack{
 	char delimiter[4];
-	char pack_size;
-	char pack_type;
 	float enc0;
 	float enc1;
 	float enc2;
@@ -87,7 +84,7 @@ struct ComTrDataPack{
 	float motor_current;
 	unsigned int dev_time;
 	unsigned int chksum;
-};
+}tra_pack;
 #define pwm_period 400
 
 #define servo_d1 TIM1->CCR1
@@ -120,16 +117,17 @@ struct ComTrDataPack{
 #define pulse_2 TIM4->CCR1       //n3
 #define pulse_3 TIM4->CCR3       //n1
 
-#define packet_size 20
+//#define packet_size 22
 /******************Global Variables**************/
 uint8_t anv=0x30;
-int a=0,b,offset_flag;
+uint8_t mcpy=0;
+int a=0,b,packet_size;
 unsigned char state = 0;  
 int recev; 
 uint8_t tx_buff[4] = {'a','b','c','\n'};     
 uint8_t mx_buff[26],mx_buff1[26]; 
-uint32_t buff11[26]; 
-uint32_t buff12[26]; 
+uint8_t buff11[22]; 
+__IO uint32_t buff12[10];
 uint32_t enc1[8],enc2[8];
 #define enco1 TIM3->CNT 
 #define enco2 TIM2->CNT 
@@ -163,6 +161,7 @@ int main(void)
 	MX_DMA_Init();
   MX_USART3_UART_Init();
 	
+	osThreadDef(copyt,copy_thread,osPriorityRealtime,0,configMINIMAL_STACK_SIZE);
 	osThreadDef(ledt,led_thread,osPriorityRealtime,0,configMINIMAL_STACK_SIZE);
 	osThreadDef(servot,servo_thread,osPriorityRealtime,0,configMINIMAL_STACK_SIZE);
 	osThreadDef(motor,motor_thread,osPriorityHigh,0,configMINIMAL_STACK_SIZE);
@@ -171,13 +170,21 @@ int main(void)
 	//hservo=osThreadCreate(osThread(servot),NULL);
 	hmotor=osThreadCreate(osThread(motor),NULL);
 	husart=osThreadCreate(osThread(usart),NULL);
+	hcopy=osThreadCreate(osThread(copyt),NULL);
 	HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_1);
   HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_3);
 	HAL_TIM_PWM_Start(&htim4, TIM_CHANNEL_1);
   HAL_TIM_PWM_Start(&htim4, TIM_CHANNEL_2);
   HAL_TIM_PWM_Start(&htim4, TIM_CHANNEL_3);
-	//	HAL_UART_Transmit_DMA(&huart3,&tx_buff[0],sizeof(tx_buff));
-		HAL_UART_Receive_DMA(&huart3,(uint8_t*)(&rec_pack),sizeof(rec_pack));
+	HAL_ADC_Start_DMA(&hadc1,buff12,8);
+	//HAL_ADC_Start_DMA(
+	//HAL_TIM_Encoder_Start_DMA(
+	osSemaphoreDef(sem1);
+	sema_sched_id=osSemaphoreCreate(osSemaphore(sem1),0);
+	packet_size=sizeof(rec_pack);
+	b=packet_size;
+	HAL_UART_Transmit_DMA(&huart3,(uint8_t *)&tra_pack,sizeof(tx_buff));
+		HAL_UART_Receive_DMA(&huart3,&mx_buff[0],packet_size);
 	//HAL_UART_Receive_DMA(&huart3,&rx_buff[0],sizeof(rx_buff));
 	HAL_GPIO_WritePin(DcCal_gpio,DcCal_pin,GPIO_PIN_RESET);
   HAL_GPIO_WritePin(EnGate_gpio,EnGate_pin,GPIO_PIN_SET);
@@ -194,7 +201,6 @@ int main(void)
 	recev=0;
 	/* Start scheduler */
   osKernelStart();
-  
 	/* We should never get here as control is now taken by the scheduler */
   /* Infinite loop */
   while (1);
@@ -202,44 +208,41 @@ int main(void)
 
 /** System Clock Configuration
 */
+static void copy_thread(void const *argument) {
+	int c;
+	while(1)
+	{
+		osSemaphoreWait(sema_sched_id,osWaitForever);
+		c=b;
+		if (c!=packet_size)
+		{
+			b=packet_size;
+		}
+		else 
+		{
+			memcpy(&rec_pack,&mx_buff,sizeof(rec_pack));
+			b=allign((uint8_t *)(&rec_pack));
+		}
+		if (b!=packet_size && b!=-1)
+		{
+			HAL_UART_Receive_DMA(&huart3,&buff11[0],b);
+		}
+		else 
+		HAL_UART_Receive_DMA(&huart3,&mx_buff[0],sizeof(rec_pack));
+		
+	}	
+}
 
 void restart1()
 {
-	//b =26;
-	memcpy(&rec_pack,&pack1,sizeof(rec_pack));
-/*	switch (a%2)
-	{
-		case 0:
-		{
-			if (offset_flag==0)
-			{
-			b=allign((uint8_t*)(&pack1));
-			}
-			
-			
-			HAL_UART_Receive_DMA(&huart3,(uint8_t*)(&pack2),b);
-			break;
-		}
-		case 1:
-		{
-			if (offset_flag==0)
-			{
-			b=allign((uint8_t*)(&rec_pack));
-			}
-			HAL_UART_Receive_DMA(&huart3,(uint8_t*)(&pack1),b);
-			break;
-		}
-	}*/
-	
-	//a++;
-	//return;
+		mcpy=1;
 }
+
 int allign(uint8_t buff[26])
 {
 		if (buff[0]==0xAA && buff[1]==0x55 && buff[2]==0xE1 && buff[3]==0x1E)	
 		{	
 			return(packet_size);
-			offset_flag=0;
 		}
 		else
 		{
@@ -249,7 +252,6 @@ int allign(uint8_t buff[26])
 					{
 						if (buff[(i+1)%packet_size]==0x55 && buff[(i+2)%packet_size]==0xE1 && buff[(i+3)%packet_size]==0x1E)
 						{
-							offset_flag=1;
 							return(i);
 						}
 					}
@@ -260,7 +262,16 @@ int allign(uint8_t buff[26])
 static void usart_thread(void const *argument) {
 	char delimiter;
 	while(1){
-		delimiter = rec_pack.delimiter[0];
+		tra_pack.enc0=enco1;
+		tra_pack.enc1=enco2;
+		tra_pack.enc2=enco3;
+		tra_pack.enc3=enco4;
+		tra_pack.delimiter[0]=0xAA;
+		tra_pack.delimiter[1]=0x55;
+		tra_pack.delimiter[2]=0xE1;
+		tra_pack.delimiter[3]=0x1E;
+		tra_pack.motor_current=3;
+		tra_pack.dev_time=7;
 		
 	}
 }
@@ -281,7 +292,6 @@ static void servo_thread(void const *argument)
 
 static void motor_thread(void const *argument)
 {
-	int a=0;
 	while (1)
   { 
     /* get the rotor state of the bldc */
@@ -299,9 +309,11 @@ static void motor_thread(void const *argument)
     {
       motor_rotate_backward(state, abs(recev));
     }
-		if (a%100000==0)		HAL_GPIO_TogglePin(Led_gpio,Led_pin2);
-		a++; 
-			
+		if (mcpy==1)
+		{
+			osSemaphoreRelease(sema_sched_id);
+			mcpy=0;	
+		}
   }
 }
 
@@ -309,7 +321,7 @@ static void led_thread(void const *argument)
 {
 	while(1)
 	{
-		//HAL_GPIO_TogglePin(Led_gpio,Led_pin);
+		HAL_GPIO_TogglePin(Led_gpio,Led_pin);
 		osDelay(50);
 	}
 }

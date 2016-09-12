@@ -56,9 +56,9 @@ static void usart_thread(void const *argument);
 void motor_rotate_forward(char sens, uint8_t duty_motor);
 void motor_rotate_backward(char sens, uint8_t duty_motor);
 void HAL_TIM_MspPostInit(TIM_HandleTypeDef *htim);
-void restart1();
 int allign(uint8_t buff[26]);
 static void copy_thread(void const *argument);
+unsigned int checksum(uint8_t buff[],int k);
 
 /********************Defines***************/
 
@@ -72,8 +72,6 @@ struct ComRecDataPack{
 
 struct ComTrDataPack{
 	char delimiter[4];
-	char pack_size;
-	char pack_type;
 	float enc0;
 	float enc1;
 	float enc2;
@@ -86,7 +84,7 @@ struct ComTrDataPack{
 	float motor_current;
 	unsigned int dev_time;
 	unsigned int chksum;
-};
+}tra_pack;
 #define pwm_period 400
 
 #define servo_d1 TIM1->CCR1
@@ -129,6 +127,7 @@ int recev;
 uint8_t tx_buff[4] = {'a','b','c','\n'};     
 uint8_t mx_buff[26],mx_buff1[26]; 
 uint8_t buff11[22]; 
+uint32_t buff12[10];
 uint32_t enc1[8],enc2[8];
 #define enco1 TIM3->CNT 
 #define enco2 TIM2->CNT 
@@ -166,7 +165,7 @@ int main(void)
 	osThreadDef(ledt,led_thread,osPriorityRealtime,0,configMINIMAL_STACK_SIZE);
 	osThreadDef(servot,servo_thread,osPriorityRealtime,0,configMINIMAL_STACK_SIZE);
 	osThreadDef(motor,motor_thread,osPriorityHigh,0,configMINIMAL_STACK_SIZE);
-	osThreadDef(usart,usart_thread,osPriorityHigh,0,configMINIMAL_STACK_SIZE);
+	osThreadDef(usart,usart_thread,osPriorityRealtime,0,configMINIMAL_STACK_SIZE);
 	hled=osThreadCreate(osThread(ledt),NULL);
 	//hservo=osThreadCreate(osThread(servot),NULL);
 	hmotor=osThreadCreate(osThread(motor),NULL);
@@ -177,12 +176,15 @@ int main(void)
 	HAL_TIM_PWM_Start(&htim4, TIM_CHANNEL_1);
   HAL_TIM_PWM_Start(&htim4, TIM_CHANNEL_2);
   HAL_TIM_PWM_Start(&htim4, TIM_CHANNEL_3);
-	
+	HAL_ADC_Start_DMA(&hadc1,&buff12[0],8);
+	//HAL_ADC_Start_DMA(
 	osSemaphoreDef(sem1);
 	sema_sched_id=osSemaphoreCreate(osSemaphore(sem1),0);
 	packet_size=sizeof(rec_pack);
 	b=packet_size;
-	//	HAL_UART_Transmit_DMA(&huart3,&tx_buff[0],sizeof(tx_buff));
+	//HAL_UART_Transmit_DMA(&huart3,&tx_buff[0],sizeof(tx_buff));
+	
+	HAL_UART_Transmit_DMA(&huart3,(uint8_t *)&tra_pack,sizeof(tra_pack));
 		HAL_UART_Receive_DMA(&huart3,&mx_buff[0],packet_size);
 	//HAL_UART_Receive_DMA(&huart3,&rx_buff[0],sizeof(rx_buff));
 	HAL_GPIO_WritePin(DcCal_gpio,DcCal_pin,GPIO_PIN_RESET);
@@ -200,7 +202,6 @@ int main(void)
 	recev=0;
 	/* Start scheduler */
   osKernelStart();
-  
 	/* We should never get here as control is now taken by the scheduler */
   /* Infinite loop */
   while (1);
@@ -229,14 +230,14 @@ static void copy_thread(void const *argument) {
 		}
 		else 
 		HAL_UART_Receive_DMA(&huart3,&mx_buff[0],sizeof(rec_pack));
-		
+		//servo_d1=75+(25*rec_pack.steering_angle);
+	
 	}	
 }
 
 void restart1()
 {
-			mcpy=1;
-	
+		mcpy=1;
 }
 
 int allign(uint8_t buff[26])
@@ -244,7 +245,6 @@ int allign(uint8_t buff[26])
 		if (buff[0]==0xAA && buff[1]==0x55 && buff[2]==0xE1 && buff[3]==0x1E)	
 		{	
 			return(packet_size);
-		
 		}
 		else
 		{
@@ -254,7 +254,6 @@ int allign(uint8_t buff[26])
 					{
 						if (buff[(i+1)%packet_size]==0x55 && buff[(i+2)%packet_size]==0xE1 && buff[(i+3)%packet_size]==0x1E)
 						{
-							
 							return(i);
 						}
 					}
@@ -263,11 +262,32 @@ int allign(uint8_t buff[26])
 		return (-1);
 }
 static void usart_thread(void const *argument) {
-	char delimiter;
+
 	while(1){
-		delimiter = rec_pack.delimiter[0];
+		tra_pack.enc0=49;
+		tra_pack.enc1=50;
+		tra_pack.enc2=51;
+		tra_pack.enc3=52;
+		tra_pack.delimiter[0]=0xAA;
+		tra_pack.delimiter[1]=0x55;
+		tra_pack.delimiter[2]=0xE1;
+		tra_pack.delimiter[3]=0x1E;
+		tra_pack.motor_current=3;
+		tra_pack.dev_time=7;
+		
+		tra_pack.chksum=checksum( (uint8_t *)(&tra_pack),sizeof(tra_pack));
 		
 	}
+}
+
+unsigned int checksum(uint8_t buff[],int k)
+{
+	unsigned int sum=0;
+	for (int i=0; i<(k-4);i++)
+	{
+		sum+=buff[i];
+	}
+	return sum;
 }
 
 static void servo_thread(void const *argument)
@@ -297,11 +317,11 @@ static void motor_thread(void const *argument)
     if(recev >= 0)
     {
 			
-      motor_rotate_forward(state, abs(recev));   
+      motor_rotate_forward(state, recev);   
     }
     else
     {
-      motor_rotate_backward(state, abs(recev));
+      motor_rotate_backward(state, -recev);
     }
 		if (mcpy==1)
 		{

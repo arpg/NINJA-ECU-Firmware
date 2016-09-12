@@ -1,8 +1,8 @@
 /**
   ******************************************************************************
-  * File Name          : dma.c
-  * Description        : This file provides code for the configuration
-  *                      of all the requested memory to memory DMA transfers.
+  * File Name          : dma.h
+  * Description        : This file contains all the function prototypes for
+  *                      the dma.c file
   ******************************************************************************
   *
   * COPYRIGHT(c) 2016 STMicroelectronics
@@ -31,46 +31,39 @@
   *
   ******************************************************************************
   */
+/* Define to prevent recursive inclusion -------------------------------------*/
+#ifndef __dma_H
+#define __dma_H
+
+#ifdef __cplusplus
+ extern "C" {
+#endif
+
 /* Includes ------------------------------------------------------------------*/
-#include "dma.h"
+#include "stm32f2xx_hal.h"
 
-/* USER CODE BEGIN 0 */
+/* DMA memory to memory transfer handles -------------------------------------*/
+extern void Error_Handler(void);
 
-/* USER CODE END 0 */
+/* USER CODE BEGIN Includes */
 
-/*----------------------------------------------------------------------------*/
-/* Configure DMA                                                              */
-/*----------------------------------------------------------------------------*/
+/* USER CODE END Includes */
 
-/* USER CODE BEGIN 1 */
+/* USER CODE BEGIN Private defines */
 
-/* USER CODE END 1 */
+/* USER CODE END Private defines */
 
-/** 
-  * Enable DMA controller clock
-  */
-void MX_DMA_Init(void) 
-{
-  /* DMA controller clock enable */
-  __HAL_RCC_DMA1_CLK_ENABLE();
+void MX_DMA_Init(void);
 
-  /* DMA interrupt init */
-  /* DMA1_Stream1_IRQn interrupt configuration */
-  HAL_NVIC_SetPriority(DMA1_Stream1_IRQn, 5, 0);
-  HAL_NVIC_EnableIRQ(DMA1_Stream1_IRQn);
-  /* DMA1_Stream3_IRQn interrupt configuration */
-  HAL_NVIC_SetPriority(DMA1_Stream3_IRQn, 5, 0);
-  HAL_NVIC_EnableIRQ(DMA1_Stream3_IRQn);
+/* USER CODE BEGIN Prototypes */
 
+/* USER CODE END Prototypes */
+
+#ifdef __cplusplus
 }
+#endif
 
-/* USER CODE BEGIN 2 */
-
-/* USER CODE END 2 */
-
-/**
-  * @}
-  */
+#endif /* __dma_H */
 
 /**
   * @}
