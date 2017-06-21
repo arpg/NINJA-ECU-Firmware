@@ -32,481 +32,92 @@
   */
 /* Includes ------------------------------------------------------------------*/
 #include "stm32f2xx_hal.h"
-#include "cmsis_os.h"
 #include "adc.h"
+#include "dma.h"
 #include "tim.h"
 #include "usart.h"
-#include "dma.h"
 #include "gpio.h"
-#include <string.h>
+#include "functions.h"
 
-/* Private variables ---------------------------------------------------------*/
 void SystemClock_Config(void);
-void Error_Handler(void);
-void MX_FREERTOS_Init(void);
 
-osThreadId hscheduler,himu,hmotor,hled,hservo,husart,hcopy;
-osSemaphoreId sema_sched_id;
-
-/* Private function prototypes -----------------------------------------------*/
-static void led_thread(void const *argument);
-static void servo_thread(void const *argument);
-static void motor_thread(void const *argument);
-static void usart_thread(void const *argument);
-void motor_rotate_forward(char sens, uint8_t duty_motor);
-void motor_rotate_backward(char sens, uint8_t duty_motor);
-void HAL_TIM_MspPostInit(TIM_HandleTypeDef *htim);
-int allign(uint8_t buff[26]);
-static void copy_thread(void const *argument);
-unsigned int checksum(uint8_t buff[],int k);
-
-/********************Defines***************/
-
-struct ComRecDataPack{
-	char delimiter[4];
-	float steering_angle;
-	float motor_power_percent;
-	unsigned int dev_time;
-	unsigned int chksum;
-}rec_pack,pack1,pack2;
-
-struct ComTrDataPack{
-	char delimiter[4];
-	float enc0;
-	float enc1;
-	float enc2;
-	float enc3;
-	float steer_ang;
-	float swing_ang0;
-	float swing_ang1;
-	float swing_ang2;
-	float swing_ang3;
-	float motor_current;
-	unsigned int dev_time;
-	unsigned int chksum;
-}tra_pack;
-#define pwm_period 400
+extern float motor_p;
+extern int packet_size,b;
+int send_packet_size;
+extern struct ComRecDataPack rec_pack;
+extern struct ComTrDataPack tra_pack;
+extern uint8_t mx_buff[26];
+char abcd[4]="abcd";
+extern uint32_t enc1[8],enc2[8];
+int watchdog;
 
 #define servo_d1 TIM1->CCR1
 #define servo_d2 TIM1->CCR3
 
-#define Led_gpio      GPIOE
-#define Led_pin       GPIO_PIN_2
-#define Led_pin2       GPIO_PIN_3
-
-#define ph_u_l        GPIO_PIN_14         //N1
-#define ph_v_l        GPIO_PIN_7         //N3
-#define ph_w_l        GPIO_PIN_6          //N2
-
-#define ph_u_h        GPIO_PIN_0				//P1
-#define ph_v_h        GPIO_PIN_1				//P3
-#define ph_w_h        GPIO_PIN_14				//P2
-
-#define sens_gpio     GPIOD
-#define sens_ph1_pin  GPIO_PIN_11
-#define sens_ph2_pin  GPIO_PIN_10
-#define sens_ph3_pin  GPIO_PIN_9
-
-/* Motor controller dedicated pins */
-#define DcCal_gpio    GPIOD
-#define DcCal_pin     GPIO_PIN_3
-#define EnGate_gpio   GPIOB
-#define EnGate_pin    GPIO_PIN_8
-
-#define pulse_1 TIM4->CCR2       //n2                           // compare registers of channels for motor pwm
-#define pulse_2 TIM4->CCR1       //n3
-#define pulse_3 TIM4->CCR3       //n1
-
-//#define packet_size 22
-/******************Global Variables**************/
-uint8_t anv=0x30;
-uint8_t mcpy=0;
-int a=0,b,packet_size;
-unsigned char state = 0;  
-int recev; 
-uint8_t tx_buff[4] = {'a','b','c','\n'};     
-uint8_t mx_buff[26],mx_buff1[26]; 
-uint8_t buff11[22]; 
-uint32_t buff12[10];
-uint32_t enc1[8],enc2[8];
-#define enco1 TIM3->CNT 
-#define enco2 TIM2->CNT 
-#define enco3 TIM8->CNT 
-#define enco4 TIM5->CNT 
 
 int main(void)
 {
-
-  /* USER CODE BEGIN 1 */
-
-  /* USER CODE END 1 */
-
   /* MCU Configuration----------------------------------------------------------*/
 
   /* Reset of all peripherals, Initializes the Flash interface and the Systick. */
   HAL_Init();
-	
+
   /* Configure the system clock */
   SystemClock_Config();
 
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
+
+  MX_DMA_Init();
   MX_ADC1_Init();
   MX_TIM1_Init();
   MX_TIM2_Init();
   MX_TIM3_Init();
   MX_TIM4_Init();
   MX_TIM5_Init();
-	MX_TIM8_Init();
-	MX_DMA_Init();
   MX_USART3_UART_Init();
-	
-	osThreadDef(copyt,copy_thread,osPriorityRealtime,0,configMINIMAL_STACK_SIZE);
-	osThreadDef(ledt,led_thread,osPriorityRealtime,0,configMINIMAL_STACK_SIZE);
-	osThreadDef(servot,servo_thread,osPriorityRealtime,0,configMINIMAL_STACK_SIZE);
-	osThreadDef(motor,motor_thread,osPriorityHigh,0,configMINIMAL_STACK_SIZE);
-	osThreadDef(usart,usart_thread,osPriorityRealtime,0,configMINIMAL_STACK_SIZE);
-	hled=osThreadCreate(osThread(ledt),NULL);
-	//hservo=osThreadCreate(osThread(servot),NULL);
-	hmotor=osThreadCreate(osThread(motor),NULL);
-	husart=osThreadCreate(osThread(usart),NULL);
-	hcopy=osThreadCreate(osThread(copyt),NULL);
-	HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_1);
+  MX_TIM8_Init();
+
+  /* USER CODE BEGIN 2 */
+
+  packet_size=4*sizeof(char)+2*sizeof(float)+2*sizeof(unsigned int);
+  send_packet_size=13*sizeof(float);
+  b=packet_size;
+
+  HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_1);
   HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_3);
-	HAL_TIM_PWM_Start(&htim4, TIM_CHANNEL_1);
+  HAL_TIM_PWM_Start(&htim4, TIM_CHANNEL_1);
   HAL_TIM_PWM_Start(&htim4, TIM_CHANNEL_2);
   HAL_TIM_PWM_Start(&htim4, TIM_CHANNEL_3);
-	HAL_ADC_Start_DMA(&hadc1,&buff12[0],8);
-	//HAL_ADC_Start_DMA(
-	osSemaphoreDef(sem1);
-	sema_sched_id=osSemaphoreCreate(osSemaphore(sem1),0);
-	packet_size=sizeof(rec_pack);
-	b=packet_size;
-	//HAL_UART_Transmit_DMA(&huart3,&tx_buff[0],sizeof(tx_buff));
-	
-	HAL_UART_Transmit_DMA(&huart3,(uint8_t *)&tra_pack,sizeof(tra_pack));
-		HAL_UART_Receive_DMA(&huart3,&mx_buff[0],packet_size);
-	//HAL_UART_Receive_DMA(&huart3,&rx_buff[0],sizeof(rx_buff));
-	HAL_GPIO_WritePin(DcCal_gpio,DcCal_pin,GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(DcCal_gpio,DcCal_pin,GPIO_PIN_RESET);
   HAL_GPIO_WritePin(EnGate_gpio,EnGate_pin,GPIO_PIN_SET);
-	HAL_TIM_Encoder_Start_DMA(&htim3,TIM_CHANNEL_ALL,enc1,enc2,8);
-	HAL_TIM_Encoder_Start_DMA(&htim2,TIM_CHANNEL_ALL,enc1,enc2,8);
-	HAL_TIM_Encoder_Start_DMA(&htim8,TIM_CHANNEL_ALL,enc1,enc2,8);
-	HAL_TIM_Encoder_Start_DMA(&htim5,TIM_CHANNEL_ALL,enc1,enc2,8);
-	
-//	HAL_DMAEx_MultiBufferStart(huart3.hdmarx, (uint32_t)huart3.pRxBuffPtr,buff11[0],buff12[0],sizeof(buff11));
+  HAL_TIM_Encoder_Start(&htim3, TIM_CHANNEL_ALL);
+  HAL_TIM_Encoder_Start(&htim2, TIM_CHANNEL_ALL);
+  HAL_TIM_Encoder_Start(&htim8, TIM_CHANNEL_ALL);
+  HAL_TIM_Encoder_Start(&htim5, TIM_CHANNEL_ALL);
 
-	
-	servo_d1=75;
-	servo_d2=75;
-	recev=0;
-	/* Start scheduler */
-  osKernelStart();
-	/* We should never get here as control is now taken by the scheduler */
-  /* Infinite loop */
-  while (1);
+  servo_d1=75;
+  servo_d2=75;
+  //HAL_UART_Receive_DMA(&huart3,(uint8_t *)&rec_pack,sizeof(rec_pack));
+  HAL_UART_Transmit_DMA(&huart3,(uint8_t *)&tra_pack,send_packet_size);
+
+  /* USER CODE END 2 */
+  while (1)
+  {
+
+		motor_func(motor_p );
+		watchdog++;
+		if(watchdog>=10000000)
+		{
+			servo_d1=75;
+			servo_d2=75;
+			free_run();
+		}
+  }
 }
 
 /** System Clock Configuration
 */
-static void copy_thread(void const *argument) {
-	int c;
-	while(1)
-	{
-		osSemaphoreWait(sema_sched_id,osWaitForever);
-		c=b;
-		if (c!=packet_size)
-		{
-			b=packet_size;
-		}
-		else 
-		{
-			memcpy(&rec_pack,&mx_buff,sizeof(rec_pack));
-			b=allign((uint8_t *)(&rec_pack));
-		}
-		if (b!=packet_size && b!=-1)
-		{
-			HAL_UART_Receive_DMA(&huart3,&buff11[0],b);
-		}
-		else 
-		HAL_UART_Receive_DMA(&huart3,&mx_buff[0],sizeof(rec_pack));
-		//servo_d1=75+(25*rec_pack.steering_angle);
-	
-	}	
-}
-
-void restart1()
-{
-		mcpy=1;
-}
-
-int allign(uint8_t buff[26])
-{
-		if (buff[0]==0xAA && buff[1]==0x55 && buff[2]==0xE1 && buff[3]==0x1E)	
-		{	
-			return(packet_size);
-		}
-		else
-		{
-			for (int i=1;i<packet_size;i++)
-				{
-					if (buff[i]==0xAA)
-					{
-						if (buff[(i+1)%packet_size]==0x55 && buff[(i+2)%packet_size]==0xE1 && buff[(i+3)%packet_size]==0x1E)
-						{
-							return(i);
-						}
-					}
-				}
-		}		
-		return (-1);
-}
-static void usart_thread(void const *argument) {
-
-	while(1){
-		tra_pack.enc0=49;
-		tra_pack.enc1=50;
-		tra_pack.enc2=51;
-		tra_pack.enc3=52;
-		tra_pack.delimiter[0]=0xAA;
-		tra_pack.delimiter[1]=0x55;
-		tra_pack.delimiter[2]=0xE1;
-		tra_pack.delimiter[3]=0x1E;
-		tra_pack.motor_current=3;
-		tra_pack.dev_time=7;
-		
-		tra_pack.chksum=checksum( (uint8_t *)(&tra_pack),sizeof(tra_pack));
-		
-	}
-}
-
-unsigned int checksum(uint8_t buff[],int k)
-{
-	unsigned int sum=0;
-	for (int i=0; i<(k-4);i++)
-	{
-		sum+=buff[i];
-	}
-	return sum;
-}
-
-static void servo_thread(void const *argument)
-{
-	while(1)
-	{
-		servo_d1=35;
-		servo_d2=35;
-		osDelay(1000);
-		servo_d1=120;
-		servo_d2=120;
-		osDelay(1000);
-		anv++;
-	}
-}
-
-static void motor_thread(void const *argument)
-{
-	while (1)
-  { 
-    /* get the rotor state of the bldc */
-    state = HAL_GPIO_ReadPin(sens_gpio,sens_ph1_pin);
-    state = state << 1;
-    state |= HAL_GPIO_ReadPin(sens_gpio,sens_ph2_pin);
-    state = state << 1;
-    state |= HAL_GPIO_ReadPin(sens_gpio,sens_ph3_pin);
-    if(recev >= 0)
-    {
-			
-      motor_rotate_forward(state, recev);   
-    }
-    else
-    {
-      motor_rotate_backward(state, -recev);
-    }
-		if (mcpy==1)
-		{
-			osSemaphoreRelease(sema_sched_id);
-			mcpy=0;	
-		}
-  }
-}
-
-static void led_thread(void const *argument)
-{
-	while(1)
-	{
-		HAL_GPIO_TogglePin(Led_gpio,Led_pin);
-		osDelay(50);
-	}
-}
-
-
-void GPIO_pwm(uint16_t GPIO_Pin, GPIO_PinState PinState, uint8_t duty)
-{
-  /* calculation of duty cycle relative to period */
-  uint8_t duty_cycle_motor = 0;
-  duty_cycle_motor = (duty * pwm_period)/100; 
-  /* if pin state is set apply the duty cycle value to the compare register of the particular pin */
-  if(PinState == GPIO_PIN_SET)
-  {
-    switch(GPIO_Pin)
-     {
-        case(ph_u_l):
-          pulse_3 = duty_cycle_motor;
-        break;
-
-        case(ph_v_l):
-          pulse_2 = duty_cycle_motor;
-        break;
-
-        case(ph_w_l):
-          pulse_1 = duty_cycle_motor;
-        break;
-
-        default:
-        break;
-    }
-  } 
-  /* if pin state is reset then reset the pin */
-  else 
-  {
-    switch(GPIO_Pin)
-     {
-        case(ph_u_l):
-         pulse_3 = 0;
-        break;
-
-        case(ph_v_l):
-          pulse_2 = 0;
-        break;
-
-        case(ph_w_l):
-          pulse_1 = 0;
-        break;
-
-        default:
-        break;
-      }
-  }
-}
-/* This function returns NULL and is mostly responsible for driving the BLDC motor in forward direction
-   The low side of the MOSFETs are responsible for providing PWMs while the high side of the MOSFETs are 
-    hard coded. The MOSFETs are arranged in a hex converter configuration. There are 6 rotor states.*/
-void motor_rotate_forward(char sens, uint8_t duty_motor)
-{
-    switch(sens) {
-      case 5:   
-        GPIO_pwm(ph_u_l,GPIO_PIN_RESET,duty_motor);
-        HAL_GPIO_WritePin(GPIOB,ph_v_h,GPIO_PIN_RESET);
-        HAL_GPIO_WritePin(GPIOE,ph_w_h,GPIO_PIN_RESET);
-        GPIO_pwm(ph_w_l,GPIO_PIN_RESET,duty_motor);
-        GPIO_pwm(ph_v_l,GPIO_PIN_SET, duty_motor);
-        HAL_GPIO_WritePin(GPIOB,ph_u_h,GPIO_PIN_SET);
-        break;
-      case 4:   
-        HAL_GPIO_WritePin(GPIOB,ph_v_h,GPIO_PIN_RESET);
-        GPIO_pwm(ph_u_l,GPIO_PIN_RESET,duty_motor);
-        GPIO_pwm(ph_v_l,GPIO_PIN_RESET,duty_motor);
-        HAL_GPIO_WritePin(GPIOE,ph_w_h,GPIO_PIN_RESET);  
-        HAL_GPIO_WritePin(GPIOB,ph_u_h,GPIO_PIN_SET);
-        GPIO_pwm(ph_w_l,GPIO_PIN_SET,duty_motor);
-        break;
-      case 6:   
-        HAL_GPIO_WritePin(GPIOB,ph_u_h,GPIO_PIN_RESET);
-        GPIO_pwm(ph_u_l,GPIO_PIN_RESET,duty_motor);
-        GPIO_pwm(ph_v_l,GPIO_PIN_RESET,duty_motor);
-        HAL_GPIO_WritePin(GPIOE,ph_w_h,GPIO_PIN_RESET);
-        HAL_GPIO_WritePin(GPIOB,ph_v_h,GPIO_PIN_SET);
-        GPIO_pwm(ph_w_l,GPIO_PIN_SET,duty_motor);
-        break;
-      case 2:   
-        HAL_GPIO_WritePin(GPIOB,ph_u_h,GPIO_PIN_RESET);
-        GPIO_pwm(ph_v_l,GPIO_PIN_RESET,duty_motor);
-        HAL_GPIO_WritePin(GPIOE,ph_w_h,GPIO_PIN_RESET);
-        GPIO_pwm(ph_w_l,GPIO_PIN_RESET,duty_motor);   
-        GPIO_pwm(ph_u_l,GPIO_PIN_SET,duty_motor);
-        HAL_GPIO_WritePin(GPIOB,ph_v_h,GPIO_PIN_SET);
-        break;
-      case 3:   
-        HAL_GPIO_WritePin(GPIOB,ph_u_h,GPIO_PIN_RESET);
-        HAL_GPIO_WritePin(GPIOB,ph_v_h,GPIO_PIN_RESET);
-        GPIO_pwm(ph_v_l,GPIO_PIN_RESET,duty_motor);
-        GPIO_pwm(ph_w_l,GPIO_PIN_RESET,duty_motor);
-        HAL_GPIO_WritePin(GPIOE,ph_w_h,GPIO_PIN_SET);
-        GPIO_pwm(ph_u_l,GPIO_PIN_SET,duty_motor);
-        break;
-      case 1: 
-        HAL_GPIO_WritePin(GPIOB,ph_u_h,GPIO_PIN_RESET);
-        GPIO_pwm(ph_u_l,GPIO_PIN_RESET,duty_motor);
-        HAL_GPIO_WritePin(GPIOB,ph_v_h,GPIO_PIN_RESET);
-        GPIO_pwm(ph_w_l,GPIO_PIN_RESET,duty_motor);   
-        GPIO_pwm(ph_v_l,GPIO_PIN_SET,duty_motor);
-        HAL_GPIO_WritePin(GPIOE,ph_w_h,GPIO_PIN_SET);
-        break;
-      default:
-        while(1);
-      }
-}
-
-/* This function returns NULL and is mostly responsible for driving the BLDC motor in reverse direction
-   The low side of the MOSFETs are responsible for providing PWMs while the high side of the MOSFETs are 
-    hard coded. The MOSFETs are arranged in a hex converter configuration. There are 6 rotor states.*/
-void motor_rotate_backward(char sens, uint8_t duty_motor) {
-  switch(sens) {
-    case 4:   
-      HAL_GPIO_WritePin(GPIOE,ph_w_h,GPIO_PIN_RESET);
-      GPIO_pwm(ph_w_l,GPIO_PIN_RESET,duty_motor);
-      GPIO_pwm(ph_v_l,GPIO_PIN_RESET,duty_motor);
-      HAL_GPIO_WritePin(GPIOB,ph_u_h,GPIO_PIN_RESET);
-      GPIO_pwm(ph_u_l,GPIO_PIN_SET,duty_motor);
-      HAL_GPIO_WritePin(GPIOB,ph_v_h,GPIO_PIN_SET);
-      
-      break;
-    case 6:   
-      HAL_GPIO_WritePin(GPIOB,ph_v_h,GPIO_PIN_RESET);
-      GPIO_pwm(ph_v_l,GPIO_PIN_RESET,duty_motor);
-      HAL_GPIO_WritePin(GPIOB,ph_u_h,GPIO_PIN_RESET);
-      GPIO_pwm(ph_w_l,GPIO_PIN_RESET,duty_motor);
-      HAL_GPIO_WritePin(GPIOE,ph_w_h,GPIO_PIN_SET);
-      GPIO_pwm(ph_u_l,GPIO_PIN_SET,duty_motor);      
-      break;
-    case 2:   
-      HAL_GPIO_WritePin(GPIOB,ph_u_h,GPIO_PIN_RESET);
-      GPIO_pwm(ph_u_l,GPIO_PIN_RESET,duty_motor);
-      HAL_GPIO_WritePin(GPIOB,ph_v_h,GPIO_PIN_RESET);
-      GPIO_pwm(ph_w_l,GPIO_PIN_RESET,duty_motor);
-      GPIO_pwm(ph_v_l,GPIO_PIN_SET,duty_motor);
-      HAL_GPIO_WritePin(GPIOE,ph_w_h,GPIO_PIN_SET);      
-      break;
-    case 3:   
-      HAL_GPIO_WritePin(GPIOE,ph_w_h,GPIO_PIN_RESET);
-      GPIO_pwm(ph_w_l,GPIO_PIN_RESET,duty_motor);
-      GPIO_pwm(ph_u_l,GPIO_PIN_RESET,duty_motor);
-      HAL_GPIO_WritePin(GPIOB,ph_v_h,GPIO_PIN_RESET);
-      HAL_GPIO_WritePin(GPIOB,ph_u_h,GPIO_PIN_SET);
-      GPIO_pwm(ph_v_l,GPIO_PIN_SET,duty_motor);
-      break;
-    case 1:   
-      HAL_GPIO_WritePin(GPIOB,ph_v_h,GPIO_PIN_RESET);
-      GPIO_pwm(ph_v_l,GPIO_PIN_RESET,duty_motor);
-      HAL_GPIO_WritePin(GPIOE,ph_w_h,GPIO_PIN_RESET);
-      GPIO_pwm(ph_u_l,GPIO_PIN_RESET,duty_motor);
-      GPIO_pwm(ph_w_l,GPIO_PIN_SET,duty_motor);
-      HAL_GPIO_WritePin(GPIOB,ph_u_h,GPIO_PIN_SET);
-      break;
-    case 5: 
-      HAL_GPIO_WritePin(GPIOB,ph_u_h,GPIO_PIN_RESET);
-      GPIO_pwm(ph_u_l,GPIO_PIN_RESET,duty_motor);
-      GPIO_pwm(ph_v_l,GPIO_PIN_RESET,duty_motor);
-      HAL_GPIO_WritePin(GPIOE,ph_w_h,GPIO_PIN_RESET);
-      HAL_GPIO_WritePin(GPIOB,ph_v_h,GPIO_PIN_SET);
-      GPIO_pwm(ph_w_l,GPIO_PIN_SET,duty_motor);
-      break;
-    default:
-      while(1);
-    }
-}
-
 void SystemClock_Config(void)
 {
 
@@ -542,7 +153,7 @@ void SystemClock_Config(void)
   HAL_SYSTICK_CLKSourceConfig(SYSTICK_CLKSOURCE_HCLK);
 
   /* SysTick_IRQn interrupt configuration */
-  HAL_NVIC_SetPriority(SysTick_IRQn, 15, 0);
+  HAL_NVIC_SetPriority(SysTick_IRQn, 0, 0);
 }
 
 /* USER CODE BEGIN 4 */
@@ -575,14 +186,14 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
   * @param  None
   * @retval None
   */
-void Error_Handler(void)
+void _Error_Handler(char * file, int line)
 {
   /* USER CODE BEGIN Error_Handler */
   /* User can add his own implementation to report the HAL error return state */
   while(1) 
   {
   }
-  /* USER CODE END Error_Handler */ 
+  /* USER CODE END Error_Handler */
 }
 
 #ifdef USE_FULL_ASSERT
