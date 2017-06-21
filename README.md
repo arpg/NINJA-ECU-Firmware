@@ -14,4 +14,4 @@ versions of firmware should be in sync with [NINJA-ECU](https://github.com/arpg/
 * after you are done with your code add a minor tag of 1 to your last commit (ex. add tag **v.3.1**)
 
 ## How to add minor changes for last major board?
-* apply andd commit your changes when you were done add a minor tag for your commit (ex. add tag **v.3.2**)
+* apply and commit your changes when you were done add a minor tag for your commit (ex. add tag **v.3.2**)
