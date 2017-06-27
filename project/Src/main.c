@@ -42,14 +42,10 @@
 void SystemClock_Config(void);
 
 extern float motor_p;
-extern int packet_size,b;
-int send_packet_size;
 extern struct ComRecDataPack rec_pack;
 extern struct ComTrDataPack tra_pack;
-extern uint8_t mx_buff[26];
-char abcd[4]="abcd";
-extern uint32_t enc1[8],enc2[8];
-int watchdog;
+uint32_t watch;
+uint32_t timer = 0;
 
 #define servo_d1 TIM1->CCR1
 #define servo_d2 TIM1->CCR3
@@ -77,13 +73,9 @@ int main(void)
   MX_TIM5_Init();
   MX_USART3_UART_Init();
   MX_TIM8_Init();
+  MX_TIM7_Init();
 
   /* USER CODE BEGIN 2 */
-
-  packet_size=4*sizeof(char)+2*sizeof(float)+2*sizeof(unsigned int);
-  send_packet_size=13*sizeof(float);
-  b=packet_size;
-
   HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_1);
   HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_3);
   HAL_TIM_PWM_Start(&htim4, TIM_CHANNEL_1);
@@ -95,20 +87,22 @@ int main(void)
   HAL_TIM_Encoder_Start(&htim2, TIM_CHANNEL_ALL);
   HAL_TIM_Encoder_Start(&htim8, TIM_CHANNEL_ALL);
   HAL_TIM_Encoder_Start(&htim5, TIM_CHANNEL_ALL);
+  //HAL_TIM_Base_Start_IT(&htim7);
 
   servo_d1=75;
   servo_d2=75;
-  //HAL_UART_Receive_DMA(&huart3,(uint8_t *)&rec_pack,sizeof(rec_pack));
-  HAL_UART_Transmit_DMA(&huart3,(uint8_t *)&tra_pack,send_packet_size);
+  HAL_UART_Receive_DMA(&huart3,(uint8_t *)&rec_pack,sizeof(rec_pack));
+  HAL_UART_Transmit_DMA(&huart3,(uint8_t *)&tra_pack,sizeof(tra_pack));
 
   /* USER CODE END 2 */
   while (1)
   {
 
 		motor_func(motor_p );
-		watchdog++;
-		if(watchdog>=10000000)
+		watch++;				//Watchdog timer which counts global variable to check for USB disconnection
+		if(watch>=10000000)
 		{
+		//****Sets servos and motor to default if not USB response****//
 			servo_d1=75;
 			servo_d2=75;
 			free_run();
@@ -177,7 +171,9 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
     HAL_IncTick();
   }
 /* USER CODE BEGIN Callback 1 */
-
+  if (htim->Instance == TIM7) {
+     timer++;
+   }
 /* USER CODE END Callback 1 */
 }
 
