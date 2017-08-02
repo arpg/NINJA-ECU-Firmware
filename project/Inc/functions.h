@@ -1,7 +1,18 @@
 #ifndef __func_H
 #define __func_H
 
+/********************Includes***************/
+
+
 #include "stm32f2xx_hal.h"
+#include "usart.h"
+#include "adc.h"
+#include <string.h>
+#include <stdlib.h>
+#include <math.h>
+
+/********************Function Definitions***************/
+
 void copy_func();
 void motor_func(int motor_speed);
 void send_func();
@@ -14,12 +25,17 @@ unsigned int checksum(uint8_t buff[],int k);
 void HAL_UART_TxCpltCallback(UART_HandleTypeDef *huart);
 void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart);
 void free_run();
+void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin);
+void motor_pid(float desired_speed);
+void SetGainP(double p);
+void SetGainI(double i);
+void SetGainD(double d);
+void SetPlantError(double error/*desired-current*/);
+double GetControlOutput(double time);
 
 /********************Defines***************/
 
 #define pwm_period 400
-
-
 
 #define Led_gpio      GPIOE
 #define Led_pin       GPIO_PIN_2
@@ -52,46 +68,68 @@ void free_run();
 #define enco2 TIM2->CNT
 #define enco3 TIM8->CNT
 #define enco4 TIM5->CNT
+#define clk TIM6->CNT
 
 #define servo_d1 TIM1->CCR1
-#define servo_d2 TIM1->CCR3
+#define servo_d2 TIM1->CCR2
+
 
 #define rads_sec 2000*M_PI			//Constant value for calculating rads/sec on encoders
+#define tick 1000000*(M_PI/3)
+#define motor_limit 25
+
 /******************Global Variables**************/
-extern uint32_t uwTick;
-extern uint32_t watch;
-extern uint32_t timer;
-int misalligned=0;
-unsigned char state= 0;
-uint8_t buff11[22];
-uint32_t encoder_previous_position[4];
-uint32_t adc[10];
-float motor_p;
+uint16_t adc[8];
+
+
 
 /******************Structures**************/
-struct ComRecDataPack{
+
+struct ComRecDataPack
+{
 	char delimiter[4];
 	float steering_angle;
+	float rear_steering_angle;
 	float motor_power_percent;
 	unsigned int dev_time;
 	unsigned int chksum;
 };
-struct ComRecDataPack rec_pack,pack1,pack2;
+struct ComRecDataPack rec_pack;
 
-struct ComTrDataPack{
+struct ComTrDataPack
+{
 	char delimiter[4];
 	float enc0;
 	float enc1;
 	float enc2;
 	float enc3;
 	unsigned int steer_ang;
+	unsigned int rear_steer_ang;
 	unsigned int swing_ang0;
 	unsigned int swing_ang1;
 	unsigned int swing_ang2;
 	unsigned int swing_ang3;
 	unsigned int motor_current;
+	unsigned int batt_volt;
 	unsigned int dev_time;
 	unsigned int chksum;
 };
 struct ComTrDataPack tra_pack;
+
+struct clock_structure
+{
+	uint32_t lower_value_tick;
+	uint32_t higher_value_tick;
+};
+struct clock_structure encoder_clock, motor_clock, pid_clock, transmit_clock;
+
+struct PID_Controller{
+	double gain_p_;
+	double gain_i_;
+	double gain_d_;
+	double integral_value;
+	double prev_error_;
+	double curr_error_;
+};
+struct PID_Controller bldc_motor_pid;
 #endif

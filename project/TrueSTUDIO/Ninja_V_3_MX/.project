@@ -119,7 +119,7 @@
 		<link>
 			<name>Application/User/functions.c</name>
 			<type>1</type>
-			<location>C:/Users/arpg/Desktop/Test/Src/functions.c</location>
+			<location>C:/Users/arpg/Documents/GitHub/NINJA-ECU-Firmware/project/Src/functions.c</location>
 		</link>
 		<link>
 			<name>Application/User/gpio.c</name>
