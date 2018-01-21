@@ -3,12 +3,15 @@
 unsigned char state = 0;
 extern uint32_t uwTick;
 extern uint32_t watch;
+extern uint32_t timer;
 int misalligned=0;
 uint8_t buff11[22];
 uint32_t encoder_previous_position[4];
-uint8_t previous_state;
 double motor_speed;
 float motor_p;
+uint8_t previous_state;
+int speed[12] = {0,0,0,0,0,0,0,0,0,0,0,0};
+uint8_t index_t = 0;
 
 
 
@@ -46,7 +49,6 @@ void send_func()
 			//int32_t time1 = (uwTick*1000+TIM6->CNT);					//Finds time since last buffer was sent
 
 
-
 			float encoder0_speed = (((int)(encoder_previous_position[0] - enco1))*rads_sec)/time1;		//Calculates speed of encoder in rads/sec
 			float encoder1_speed = (((int)(encoder_previous_position[1] - enco2))*rads_sec)/time1;		//Calculates speed of encoder in rads/sec
 			float encoder2_speed = (((int)(encoder_previous_position[2] - enco3))*rads_sec)/time1;		//Calculates speed of encoder in rads/sec
@@ -62,12 +64,13 @@ void send_func()
 			tra_pack.enc1=encoder1_speed;			//rl wheel
 			tra_pack.enc2=encoder2_speed;			//rr wheel
 			tra_pack.enc3=encoder3_speed;			//fr wheel
-
+			//tra_pack.enc3=motor_speed;
 
 
 			tra_pack.dev_time=uwTick*1000+TIM6->CNT;
-			tra_pack.steer_ang=adc[0];
-			tra_pack.rear_steer_ang=adc[1];
+			//tra_pack.dev_time = (sens_gpio->IDR&(sens_ph1_pin|sens_ph2_pin|sens_ph3_pin))>>9;
+			tra_pack.steer_ang=(adc[0]-2180)*angle_conv;
+			tra_pack.rear_steer_ang=(adc[1]-2100)*angle_conv;
 			tra_pack.swing_ang0=adc[2];
 			tra_pack.swing_ang1=adc[3];
 			tra_pack.swing_ang2=adc[4];
@@ -89,7 +92,7 @@ void send_func()
 			//TIM6->CNT = 0;					//resets timer's lower value tick
 }
 
-void motor_func(int motor_speed)
+void motor_func(int motor_speed_)
 {
 	uint32_t port_value = sens_gpio->IDR;
 	state = 0;
@@ -103,22 +106,21 @@ void motor_func(int motor_speed)
 		state |= 0x01;
 	}
 
-	if(motor_speed > motor_limit)
+	if(motor_speed_ > motor_limit)
 	{
-		motor_speed = motor_limit;
+		motor_speed_ = motor_limit;
 	}
-	else if(motor_speed < -motor_limit)
+	else if(motor_speed_ < -motor_limit)
 	{
-		motor_speed = -motor_limit;
+		motor_speed_ = -motor_limit;
 	}
-
-    if(motor_speed > 0)
+    if(motor_speed_ > 0)
     {
-      motor_rotate_forward(state, abs(motor_speed));
+      motor_rotate_forward(state, abs(motor_speed_));
     }
-    else if(motor_speed < 0)
+    else if(motor_speed_ < 0)
     {
-      motor_rotate_backward(state, abs(motor_speed));
+      motor_rotate_backward(state, abs(motor_speed_));
     }
     else
     {
@@ -128,6 +130,10 @@ void motor_func(int motor_speed)
 
 void motor_pid(float desired_speed)
 {
+	if((desired_speed<50)&&(desired_speed>-50))
+	{
+		desired_speed = 0;
+	}
 	double time;
 	if(pid_clock.higher_value_tick == uwTick)
 	{
@@ -141,8 +147,11 @@ void motor_pid(float desired_speed)
 	}
 
 	double error = desired_speed-motor_speed;
+	//tra_pack.enc1 = error;
+	//tra_pack.enc2 = desired_speed;
 	SetPlantError(error);
 	double magnitude = GetControlOutput(time);
+	//tra_pack.enc0 = -magnitude;
 	motor_func(-magnitude);
 }
 
@@ -387,6 +396,7 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 	if((GPIO_Pin == GPIO_PIN_9)||(GPIO_Pin == GPIO_PIN_10)||(GPIO_Pin == GPIO_PIN_11))
 	{
 		uint32_t time;
+		//HAL_GPIO_TogglePin(GPIOE,GPIO_PIN_2);
 
 		if(motor_clock.higher_value_tick == uwTick)
 		{
@@ -400,78 +410,106 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 			motor_clock.lower_value_tick = clk;
 
 		}
-		uint8_t state = (sens_gpio->IDR&(sens_ph1_pin|sens_ph2_pin|sens_ph3_pin))>>9;
-		switch(state)
+
+		//time = timer*50000+TIM7->CNT;
+		//timer = 0;
+		//TIM7->CNT = 0;
+		uint8_t current_state = (sens_gpio->IDR&(sens_ph1_pin|sens_ph2_pin|sens_ph3_pin))>>9;
+		switch(current_state)
 		{
 		case(1):
 			if(previous_state == 5)
 			{
-				motor_speed = tick/time;
+				//motor_speed = tick/time;
+				speed[index_t] = tick/time;
 			}
 			else if(previous_state == 3)
 			{
-				motor_speed = -tick/time;
+				//motor_speed = -tick/time;
+				speed[index_t] = -tick/time;
 			}
 			break;
 
 		case(3):
 			if(previous_state == 1)
 			{
-				motor_speed = tick/time;
+				speed[index_t] = tick/time;
+				//motor_speed = tick/time;
 			}
 			else if(previous_state == 2)
 			{
-				motor_speed = -tick/time;
+				//motor_speed = -tick/time;
+				speed[index_t] = -tick/time;
 			}
 			break;
 
 		case(2):
 			if(previous_state == 3)
 			{
-				motor_speed = tick/time;
+//				motor_speed = tick/time;
+				speed[index_t] = tick/time;
 			}
 			else if(previous_state == 6)
 			{
-				motor_speed = -tick/time;
+//				motor_speed = -tick/time;
+				speed[index_t] = -tick/time;
 			}
 			break;
 
 		case(6):
 			if(previous_state == 2)
 			{
-				motor_speed = tick/time;
+//				motor_speed = tick/time;
+				speed[index_t] = tick/time;
 			}
 			else if(previous_state == 4)
 			{
-				motor_speed = -tick/time;
+//				motor_speed = -tick/time;
+				speed[index_t] = -tick/time;
 			}
 			break;
 
 		case(4):
 			if(previous_state == 6)
 			{
-				motor_speed = tick/time;
+//				motor_speed = tick/time;
+				speed[index_t] = tick/time;
 			}
 			else if(previous_state == 5)
 			{
-				motor_speed = -tick/time;
+//				motor_speed = -tick/time;
+				speed[index_t] = -tick/time;
 			}
 			break;
 
 		case(5):
 			if(previous_state == 4)
 			{
-				motor_speed = tick/time;
+//				motor_speed = tick/time;
+				speed[index_t] = tick/time;
 			}
 			else if(previous_state == 1)
 			{
-				motor_speed = -tick/time;
+//				motor_speed = -tick/time;
+				speed[index_t] = -tick/time;
 			}
 			break;
 		}
-		previous_state = state;
+		index_t++;
+		if(index_t==12)
+		{
+			index_t=0;
+		}
+		previous_state = current_state;
+		motor_speed = 0;
+		for(int i=0;i<12;i++)
+		{
+			motor_speed += speed[i];
+		}
+		motor_speed = motor_speed/12;
+
 	}
-	__HAL_GPIO_EXTI_CLEAR_IT(GPIO_Pin);
+	//__HAL_GPIO_EXTI_CLEAR_IT(GPIO_Pin);
 }
 
 

@@ -2,15 +2,12 @@
 #define __func_H
 
 /********************Includes***************/
-
-
 #include "stm32f2xx_hal.h"
 #include "usart.h"
 #include "adc.h"
 #include <string.h>
 #include <stdlib.h>
 #include <math.h>
-
 /********************Function Definitions***************/
 
 void copy_func();
@@ -33,7 +30,7 @@ void SetGainD(double d);
 void SetPlantError(double error/*desired-current*/);
 double GetControlOutput(double time);
 
-/********************Defines***************/
+/*******************Macros***************/
 
 #define pwm_period 400
 
@@ -75,8 +72,9 @@ double GetControlOutput(double time);
 
 
 #define rads_sec 2000*M_PI			//Constant value for calculating rads/sec on encoders
-#define tick 1000000*(M_PI/3)
-#define motor_limit 25
+#define tick 1000000*(M_PI/6)
+#define motor_limit 80
+#define angle_conv 0.75/1100
 
 /******************Global Variables**************/
 uint16_t adc[8];
@@ -103,8 +101,8 @@ struct ComTrDataPack
 	float enc1;
 	float enc2;
 	float enc3;
-	unsigned int steer_ang;
-	unsigned int rear_steer_ang;
+	float steer_ang;
+	float rear_steer_ang;
 	unsigned int swing_ang0;
 	unsigned int swing_ang1;
 	unsigned int swing_ang2;
@@ -121,7 +119,7 @@ struct clock_structure
 	uint32_t lower_value_tick;
 	uint32_t higher_value_tick;
 };
-struct clock_structure encoder_clock, motor_clock, pid_clock, transmit_clock;
+struct clock_structure encoder_clock, motor_clock, pid_clock;
 
 struct PID_Controller{
 	double gain_p_;

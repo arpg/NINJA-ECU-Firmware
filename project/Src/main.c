@@ -38,17 +38,21 @@
 #include "usart.h"
 #include "gpio.h"
 #include "functions.h"
+#include <math.h>
 
 void SystemClock_Config(void);
 
 extern float motor_p;
 extern struct ComRecDataPack rec_pack;
 extern struct ComTrDataPack tra_pack;
-extern uint8_t previous_state;
 extern double motor_speed;
 extern uint32_t uwTick;
+extern uint8_t previous_state;
+extern int speed[12];
 uint32_t watch;
 uint32_t timer = 0;
+
+
 #define servo_d1 TIM1->CCR1
 #define servo_d2 TIM1->CCR2
 
@@ -96,37 +100,46 @@ int main(void)
   servo_d2=75;
   HAL_UART_Receive_DMA(&huart3,(uint8_t *)&rec_pack,sizeof(rec_pack));
   HAL_UART_Transmit_DMA(&huart3,(uint8_t *)&tra_pack,sizeof(tra_pack));
-  previous_state = (sens_gpio->IDR&(sens_ph1_pin|sens_ph2_pin|sens_ph3_pin))>>9;
 
-  SetGainP(0.05);
-  SetGainI(0);
-  SetGainD(0);
+  previous_state = (sens_gpio->IDR&(sens_ph1_pin|sens_ph2_pin|sens_ph3_pin))>>9;
+/*
+  SetGainP(0.11);
+  SetGainI(0.00001);
+  SetGainD(0);*/
+  SetGainP(0.15);
+  SetGainI(0.00002);
+  SetGainD(1.5);
   /* USER CODE END 2 */
   while (1)
   {
 
-		motor_func(motor_p);
-	  	//float speed = motor_p*10;
-		//motor_pid(1000);
-		if(uwTick-motor_clock.higher_value_tick >= 30)
+		motor_func(40);
+	  	//float cont_speed = motor_p*24;
+		//motor_pid(cont_speed);
+
+		if(uwTick-motor_clock.higher_value_tick >= 20)
 		{
 			motor_clock.higher_value_tick = uwTick;
 			motor_speed = 0;
 		}
-		/*
-		if(uwTick-transmit_clock.higher_value_tick >= 15)
-		{
-			transmit_clock.higher_value_tick = uwTick;
-			HAL_UART_Transmit_DMA(&huart3,(uint8_t *)&tra_pack,sizeof(tra_pack));
-		}*/
-		watch++;				//"Watchdog" timer which counts global variable to check for USB disconnection
-		if(watch>=500000)
-		{
-		//****Sets servos and motor to default if not USB response****//
-			servo_d1=75;
-			servo_d2=75;
-			free_run();
-		}
+/*
+		if((uwTick-motor_clock.higher_value_tick) >= 15)
+			{
+				motor_clock.higher_value_tick = uwTick;
+				motor_clock.lower_value_tick = clk;
+				motor_speed = 0;
+			}*/
+
+		watch++;
+		//"Watchdog" timer which counts global variable to check for USB disconnection
+
+//		if(watch>100000)
+//		{
+//		//****Sets servos and motor to default if there is no USB response****
+//			servo_d1=75;
+//			servo_d2=75;
+//			free_run();
+//		}
   }
 }
 
@@ -191,15 +204,10 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
     HAL_IncTick();
   }
 /* USER CODE BEGIN Callback 1 */
-  /*
+
   if(htim->Instance == TIM7) {
 	  timer++;
-	  if(timer == 2)
-	  {
-		  HAL_UART_Transmit_DMA(&huart3,(uint8_t *)&tra_pack,sizeof(tra_pack));
-		  timer = 0;
-	  }
-  }*/
+  }
 /* USER CODE END Callback 1 */
 }
 
