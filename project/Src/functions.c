@@ -67,6 +67,7 @@ void send_func()
 			//tra_pack.enc3=motor_speed;
 
 
+			//double angle_conv=1;
 			tra_pack.dev_time=uwTick*1000+TIM6->CNT;
 			//tra_pack.dev_time = (sens_gpio->IDR&(sens_ph1_pin|sens_ph2_pin|sens_ph3_pin))>>9;
 			tra_pack.steer_ang=(adc[0]-2180)*angle_conv;

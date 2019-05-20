@@ -12,3 +12,4 @@
 *.iex
 *.uvprojx
 *.uvoptx
+/Debug/

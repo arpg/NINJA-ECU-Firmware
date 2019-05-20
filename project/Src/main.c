@@ -55,7 +55,11 @@ uint32_t timer = 0;
 
 #define servo_d1 TIM1->CCR1
 #define servo_d2 TIM1->CCR2
-
+#define USB_COMM					0
+#define USB_TIMEOUT_CHECK			0
+#define PID_CONTROL					0
+#define MOTOR_TEST					1
+#define SERVO_TEST					0
 
 int main(void)
 {
@@ -94,14 +98,17 @@ int main(void)
   HAL_TIM_Encoder_Start(&htim8, TIM_CHANNEL_ALL);
   HAL_TIM_Encoder_Start(&htim5, TIM_CHANNEL_ALL);
   //HAL_TIM_Base_Start_IT(&htim7);
-  HAL_ADC_Start_DMA(&hadc1,(uint32_t *)adc,8);
+  //HAL_ADC_Start_DMA(&hadc1,(uint32_t *)adc,8);
 
   servo_d1=75;
   servo_d2=75;
+#if USB_COM
   HAL_UART_Receive_DMA(&huart3,(uint8_t *)&rec_pack,sizeof(rec_pack));
   HAL_UART_Transmit_DMA(&huart3,(uint8_t *)&tra_pack,sizeof(tra_pack));
+#endif
 
   previous_state = (sens_gpio->IDR&(sens_ph1_pin|sens_ph2_pin|sens_ph3_pin))>>9;
+#if PID_CONTROL
 /*
   SetGainP(0.11);
   SetGainI(0.00001);
@@ -109,19 +116,35 @@ int main(void)
   SetGainP(0.15);
   SetGainI(0.00002);
   SetGainD(1.5);
+#endif
   /* USER CODE END 2 */
   while (1)
   {
+#if MOTOR_TEST
+		motor_func(30);
+#else
+		motor_func(motor_p);
+#endif
 
-		motor_func(40);
-	  	//float cont_speed = motor_p*24;
-		//motor_pid(cont_speed);
+#if SERVO_TEST
+		servo_d1 = 50;
+		servo_d2 = 50;
+		servo_d1 = 75;
+		servo_d2 = 75;
+		servo_d1 = 100;
+		servo_d1 = 100;
+#endif
+
+#if PID_CONTROL
+	  	float cont_speed = motor_p*24;
+		motor_pid(cont_speed);
 
 		if(uwTick-motor_clock.higher_value_tick >= 20)
 		{
 			motor_clock.higher_value_tick = uwTick;
 			motor_speed = 0;
 		}
+#endif
 /*
 		if((uwTick-motor_clock.higher_value_tick) >= 15)
 			{
@@ -129,17 +152,18 @@ int main(void)
 				motor_clock.lower_value_tick = clk;
 				motor_speed = 0;
 			}*/
-
+#if USB_TIMEOUT_CHECK
 		watch++;
 		//"Watchdog" timer which counts global variable to check for USB disconnection
 
-//		if(watch>100000)
-//		{
-//		//****Sets servos and motor to default if there is no USB response****
-//			servo_d1=75;
-//			servo_d2=75;
-//			free_run();
-//		}
+		if(watch>100000)
+		{
+		//****Sets servos and motor to default if there is no USB response****
+			servo_d1=75;
+			servo_d2=75;
+			free_run();
+		}
+#endif
   }
 }
 
